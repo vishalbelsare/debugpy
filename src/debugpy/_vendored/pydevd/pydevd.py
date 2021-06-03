@@ -162,6 +162,7 @@ _CACHE_FILE_TYPE = {}
 
 pydev_log.debug('Using GEVENT_SUPPORT: %s', pydevd_constants.SUPPORT_GEVENT)
 pydev_log.debug('pydevd __file__: %s', os.path.abspath(__file__))
+pydev_log.debug('PYDEVD using version with additional logging for #623')
 
 
 #=======================================================================================================================
