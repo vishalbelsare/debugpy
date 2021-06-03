@@ -566,9 +566,10 @@ class PyDBFrame:
         # cost is still high (maybe we could use code-generation in the future and make the code
         # generation be better split among what each part does).
 
-        # DEBUG = '_debugger_case_generator.py' in frame.f_code.co_filename
+        DEBUG = frame.f_code.co_filename.endswith(('gui.py', 'setup_debugpy_entrypoint.py'))
         main_debugger, abs_path_canonical_path_and_base, info, thread, frame_skips_cache, frame_cache_key = self._args
-        # if DEBUG: print('frame trace_dispatch %s %s %s %s %s %s, stop: %s' % (frame.f_lineno, frame.f_code.co_name, frame.f_code.co_filename, event, constant_to_str(info.pydev_step_cmd), arg, info.pydev_step_stop))
+        if DEBUG: 
+            pydev_log.info('frame trace_dispatch %s %s %s %s %s %s, stop: %s', frame.f_lineno, frame.f_code.co_name, frame.f_code.co_filename, event, constant_to_str(info.pydev_step_cmd), arg, info.pydev_step_stop)
         try:
             info.is_tracing += 1
             line = frame.f_lineno
@@ -726,6 +727,7 @@ class PyDBFrame:
 
             if not is_exception_event:
                 breakpoints_for_file = main_debugger.breakpoints.get(abs_path_canonical_path_and_base[1])
+                if DEBUG: pydev_log.info('Breakpoints for file: %s - filename: %s - all breakpoints: %s', breakpoints_for_file, abs_path_canonical_path_and_base[1], main_debugger.breakpoints)
 
                 can_skip = False
 
@@ -839,7 +841,7 @@ class PyDBFrame:
                             return None if is_call else NO_FTRACE
 
             # We may have hit a breakpoint or we are already in step mode. Either way, let's check what we should do in this frame
-            # if DEBUG: print('NOT skipped: %s %s %s %s' % (frame.f_lineno, frame.f_code.co_name, event, frame.__class__.__name__))
+            if DEBUG: pydev_log.info('NOT skipped: %s %s %s %s', frame.f_lineno, frame.f_code.co_name, event, frame.__class__.__name__)
 
             try:
                 flag = False
