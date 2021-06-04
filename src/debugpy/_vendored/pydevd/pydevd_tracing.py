@@ -237,7 +237,7 @@ def set_trace_to_threads(tracing_func, thread_idents=None, create_dummy_thread=T
 
         # Some (ptvsd) tests failed because of this, so, leave it always disabled for now.
         # show_debug_info = 1 if DebugInfoHolder.DEBUG_TRACE_LEVEL >= 1 else 0
-        show_debug_info = 0
+        show_debug_info = 1
 
         # Hack to increase _Py_TracingPossible.
         # See comments on py_custom_pyeval_settrace.hpp
@@ -275,6 +275,8 @@ def set_trace_to_threads(tracing_func, thread_idents=None, create_dummy_thread=T
             if result != 0:
                 pydev_log.info('Unable to set tracing for existing thread. Result: %s', result)
                 ret = result
+            else:
+                pydev_log.info('Tracing set for existing threads. Result: %s', result)
 
     return ret
 
