@@ -2,14 +2,11 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 """Tests for JSON message streams and channels.
 """
 
 import collections
 import functools
-import json
 import io
 import pytest
 import random
@@ -18,7 +15,7 @@ import socket
 import threading
 import time
 
-from debugpy.common import log, messaging
+from debugpy.common import json, log, messaging
 from tests.patterns import some
 
 
@@ -47,9 +44,9 @@ class JsonMemoryStream(object):
 
     def _log_message(self, dir, data):
         format_string = "{0} {1} " + (
-            "{2!j:indent=None}" if isinstance(data, list) else "{2!j}"
+            "{2:indent=None}" if isinstance(data, list) else "{2}"
         )
-        return log.debug(format_string, self.name, dir, data)
+        return log.debug(format_string, self.name, dir, json.repr(data))
 
     def read_json(self, decoder=None):
         decoder = decoder if decoder is not None else self.json_decoder_factory()
@@ -659,3 +656,21 @@ class TestJsonMessageChannel(object):
         assert fuzzer2.sent == fuzzer1.received
         assert fuzzer1.responses_sent == fuzzer2.responses_received
         assert fuzzer2.responses_sent == fuzzer1.responses_received
+
+
+class TestTypeConversion(object):
+    def test_str_to_num(self):
+
+        # test conversion that are expected to work
+        correct_trials = [("1.0", float), ("1", int), ("1", bool)]
+        for val_trial, type_trial in correct_trials:
+            assert isinstance(
+                json.of_type(type_trial)(val_trial), type_trial
+            ), "Wrong type coversion"
+
+        # test conversion that are not expected to work
+        try:
+            json.of_type(int)("1.0")
+            raise ValueError("This test should have failed")
+        except TypeError:
+            pass

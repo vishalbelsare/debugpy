@@ -1,19 +1,26 @@
-setuptools
-
 ## Used to run the tests:
 
 pytest
 pytest-xdist
 pytest-cov
 pytest-timeout
+pytest-retry
 
 ## Used by test helpers:
 
+importlib_metadata
 psutil
+untangle
 
 ## Used in Python code that is run/debugged by the tests:
 
 django
-requests
-gevent
 flask
+gevent
+numpy
+requests
+typing_extensions
+
+# Used to build pydevd attach to process binaries:
+vswhere
+Cython

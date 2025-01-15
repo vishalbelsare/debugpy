@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import pytest
 import sys
 
@@ -48,7 +46,7 @@ def expected_system_info():
                 {
                     "pid": some.int,
                     "executable": sys.executable,
-                    "bitness": 64 if sys.maxsize > 2 ** 32 else 32,
+                    "bitness": 64 if sys.maxsize > 2**32 else 32,
                 }
             ),
         }

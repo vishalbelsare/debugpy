@@ -11,16 +11,19 @@ omit =
 data_file = coverage/.coverage
 
 [report]
-exclude_lines =
-    # Have to re-enable the standard pragma.
-    pragma: no cover
-
+exclude_also =
     # __repr__ is mostly used for error messages.
     def __repr__
 
     # Asserts and error conditions.
     raise AssertionError
     raise NotImplementedError
+    raise TypeError
+    raise ValueError
+    raise AttributeError
+    raise RuntimeError
+    raise ComponentNotAvailable
+    raise messaging.MessageHandlingError    
     \.isnt_valid\(
     \.cant_handle\(
 

@@ -2,10 +2,7 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import pytest
-import sys
 
 from debugpy.common import log
 from tests.patterns import some
@@ -124,11 +121,7 @@ def test_in_range():
 def test_str():
     log_repr(some.str)
     assert some.str == "abc"
-
-    if sys.version_info < (3,):
-        assert b"abc" == some.str
-    else:
-        assert b"abc" != some.str
+    assert b"abc" != some.str
 
 
 def test_matching():
@@ -140,11 +133,11 @@ def test_matching():
     log_repr(pattern)
     assert pattern != "abbbc"
 
-    pattern = some.bytes.matching(br".(b+).")
+    pattern = some.bytes.matching(rb".(b+).")
     log_repr(pattern)
     assert pattern == b"abbbc"
 
-    pattern = some.bytes.matching(br"bbb")
+    pattern = some.bytes.matching(rb"bbb")
     log_repr(pattern)
     assert pattern != b"abbbc"
 

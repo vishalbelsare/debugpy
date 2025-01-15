@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 """Imported from test code that runs under debugpy, and allows that code
 to communcate back to the test. Works in conjunction with debug_session
 fixture and its backchannel method."""
@@ -15,7 +13,7 @@ import os
 import socket
 
 import debuggee
-from debugpy.common import fmt, log, messaging
+from debugpy.common import log, messaging
 
 
 def send(value):
@@ -54,7 +52,7 @@ class _stream:
     close = lambda: None
 
 
-name = fmt("backchannel-{0}", debuggee.session_id)
+name = f"backchannel-{debuggee.session_id}"
 port = os.environ.pop("DEBUGPY_TEST_BACKCHANNEL_PORT", None)
 if port is not None:
     port = int(port)

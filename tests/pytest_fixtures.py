@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import inspect
 import os
 import py
@@ -12,7 +10,7 @@ import sys
 import threading
 import types
 
-from debugpy.common import compat, fmt, log, timestamp
+from debugpy.common import log, timestamp
 import tests
 from tests import code, logs
 from tests.debug import runners, session, targets
@@ -59,7 +57,7 @@ def test_wrapper(request, long_tmpdir):
             log_subdir = request.node.nodeid
             log_subdir = log_subdir.replace("::", "/")
             for ch in r":?*|<>":
-                log_subdir = log_subdir.replace(ch, fmt("&#{0};", ord(ch)))
+                log_subdir = log_subdir.replace(ch, f"&#{ord(ch)};")
             log.log_dir += "/" + log_subdir
 
         try:
@@ -71,6 +69,7 @@ def test_wrapper(request, long_tmpdir):
         with log.to_file(prefix="tests"):
             timestamp.reset()
             log.info("{0} started.", request.node.nodeid)
+            log.describe_environment("Environment:")
             try:
                 yield
             finally:
@@ -100,10 +99,11 @@ def test_wrapper(request, long_tmpdir):
 
     finally:
         if not failed and not request.config.option.debugpy_log_passed:
-            try:
-                py.path.local(log.log_dir).remove()
-            except Exception:
-                pass
+            # try:
+            #     py.path.local(log.log_dir).remove()
+            # except Exception:
+            #     pass
+            pass
         log.log_dir = original_log_dir
 
 
@@ -141,7 +141,6 @@ if sys.platform != "win32":
     def long_tmpdir(request, tmpdir):
         return tmpdir
 
-
 else:
     import ctypes
 
@@ -151,9 +150,8 @@ else:
 
     @pytest.fixture
     def long_tmpdir(request, tmpdir):
-        """Like tmpdir, but ensures that it's a long rather than short filename on Win32.
-        """
-        path = compat.filename(tmpdir.strpath)
+        """Like tmpdir, but ensures that it's a long rather than short filename on Win32."""
+        path = tmpdir.strpath
         buffer = ctypes.create_unicode_buffer(512)
         if GetLongPathNameW(path, buffer, len(buffer)):
             path = buffer.value
@@ -222,9 +220,12 @@ def pyfile(request, long_tmpdir):
         source = [s[indent:] if s.strip() else "\n" for s in source]
         source = "".join(source)
 
+        # Add a sleep at the end so that the program doesn't exit before we can handle all of the messages it sent
+        source += "\nimport time\ntime.sleep(2)\n"
+
         # Write it to file.
         tmpfile = long_tmpdir / (name + ".py")
-        tmpfile.strpath = compat.filename(tmpfile.strpath)
+        tmpfile.strpath = tmpfile.strpath
         assert not tmpfile.check()
         tmpfile.write(source)
 

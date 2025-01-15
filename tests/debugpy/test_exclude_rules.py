@@ -2,9 +2,9 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import pytest
+
+from debugpy.common import json
 
 import tests
 from tests import code, debug, log, test_data
@@ -50,7 +50,7 @@ def test_exceptions_and_exclude_rules(pyfile, target, run, scenario, exc_type):
         rules = [{"path": code_to_debug.dirname, "include": False}]
     else:
         pytest.fail(scenario)
-    log.info("Rules: {0!j}", rules)
+    log.info("Rules: {0}", json.repr(rules))
 
     with debug.Session() as session:
         session.expected_exit_code = some.int
@@ -96,7 +96,7 @@ def test_exceptions_and_partial_exclude_rules(pyfile, target, run, scenario):
         rules = [{"path": call_me_back_dir, "include": False}]
     else:
         pytest.fail(scenario)
-    log.info("Rules: {0!j}", rules)
+    log.info("Rules: {0}", json.repr(rules))
 
     with debug.Session() as session:
         session.expected_exit_code = some.int

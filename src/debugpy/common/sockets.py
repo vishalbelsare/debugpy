@@ -2,13 +2,12 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import socket
 import sys
 import threading
 
 from debugpy.common import log
+from debugpy.common.util import hide_thread_from_debugger
 
 
 def create_server(host, port=0, backlog=socket.SOMAXCONN, timeout=None):
@@ -22,11 +21,22 @@ def create_server(host, port=0, backlog=socket.SOMAXCONN, timeout=None):
 
     try:
         server = _new_sock()
+        if port != 0:
+            # If binding to a specific port, make sure that the user doesn't have
+            # to wait until the OS times out the socket to be able to use that port
+            # again.if the server or the adapter crash or are force-killed.
+            if sys.platform == "win32":
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                try:
+                    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                except (AttributeError, OSError):  # pragma: no cover
+                    pass  # Not available everywhere
         server.bind((host, port))
         if timeout is not None:
             server.settimeout(timeout)
         server.listen(backlog)
-    except Exception:
+    except Exception:  # pragma: no cover
         server.close()
         raise
     return server
@@ -39,10 +49,6 @@ def create_client():
 
 def _new_sock():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-    if sys.platform == "win32":
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-    else:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
     # Set TCP keepalive on an open socket.
     # It activates after 1 second (TCP_KEEPIDLE,) of idleness,
@@ -50,19 +56,19 @@ def _new_sock():
     # and closes the connection after 5 failed ping (TCP_KEEPCNT), or 15 seconds
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-    except (AttributeError, OSError):
+    except (AttributeError, OSError):  # pragma: no cover
         pass  # May not be available everywhere.
     try:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 1)
-    except (AttributeError, OSError):
+    except (AttributeError, OSError):  # pragma: no cover
         pass  # May not be available everywhere.
     try:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 3)
-    except (AttributeError, OSError):
+    except (AttributeError, OSError):  # pragma: no cover
         pass  # May not be available everywhere.
     try:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 5)
-    except (AttributeError, OSError):
+    except (AttributeError, OSError):  # pragma: no cover
         pass  # May not be available everywhere.
     return sock
 
@@ -76,7 +82,7 @@ def close_socket(sock):
     """Shutdown and close the socket."""
     try:
         shut_down(sock)
-    except Exception:
+    except Exception:  # pragma: no cover
         pass
     sock.close()
 
@@ -92,7 +98,7 @@ def serve(name, handler, host, port=0, backlog=socket.SOMAXCONN, timeout=None):
 
     try:
         listener = create_server(host, port, backlog, timeout)
-    except Exception:
+    except Exception:  # pragma: no cover
         log.reraise_exception(
             "Error listening for incoming {0} connections on {1}:{2}:", name, host, port
         )
@@ -117,8 +123,7 @@ def serve(name, handler, host, port=0, backlog=socket.SOMAXCONN, timeout=None):
 
     thread = threading.Thread(target=accept_worker)
     thread.daemon = True
-    thread.pydev_do_not_trace = True
-    thread.is_pydev_daemon_thread = True
+    hide_thread_from_debugger(thread)
     thread.start()
 
     return listener

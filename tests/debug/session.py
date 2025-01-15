@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import collections
 import itertools
 import os
@@ -14,8 +12,7 @@ import sys
 import time
 
 import debugpy.adapter
-from debugpy.common import compat, fmt, json, log, messaging, sockets, util
-from debugpy.common.compat import unicode
+from debugpy.common import json, log, messaging, sockets, util
 import tests
 from tests import code, timeline, watchdog
 from tests.debug import comms, config, output
@@ -87,11 +84,28 @@ class Session(object):
 
         self.client_id = "vscode"
 
+        self.capabilities = {
+            "pathFormat": "path",
+            "clientID": self.client_id,
+            "adapterID": "test",
+            "linesStartAt1": True,
+            "columnsStartAt1": True,
+            "supportsVariableType": True,
+            "supportsRunInTerminalRequest": True,
+            "supportsArgsCanBeInterpretedByShell": True,
+            "supportsStartDebuggingRequest": False,
+        }
+
         self.debuggee = None
         """psutil.Popen instance for the debuggee process."""
 
         self.adapter = None
         """psutil.Popen instance for the adapter process."""
+
+        self.expected_adapter_sockets = {
+            "client": {"host": some.str, "port": some.int, "internal": False},
+        }
+        """The sockets which the adapter is expected to report."""
 
         self.adapter_endpoints = None
         """Name of the file that contains the adapter endpoints information.
@@ -118,6 +132,10 @@ class Session(object):
 
         self.scratchpad = comms.ScratchPad(self)
         """The ScratchPad object to talk to the debuggee."""
+
+        self.start_command = None
+        """Set to either "launch" or "attach" just before the corresponding request is sent.
+        """
 
         self.start_request = None
         """The "launch" or "attach" request that started executing code in this session.
@@ -174,12 +192,15 @@ class Session(object):
                 timeline.Event("module"),
                 timeline.Event("continued"),
                 timeline.Event("debugpyWaitingForServer"),
+                timeline.Event("debugpySockets"),
                 timeline.Event("thread", some.dict.containing({"reason": "started"})),
                 timeline.Event("thread", some.dict.containing({"reason": "exited"})),
                 timeline.Event("output", some.dict.containing({"category": "stdout"})),
                 timeline.Event("output", some.dict.containing({"category": "stderr"})),
                 timeline.Event("output", some.dict.containing({"category": "console"})),
-                timeline.Event("output", some.dict.containing({"category": "important"})),
+                timeline.Event(
+                    "output", some.dict.containing({"category": "important"})
+                ),
             ]
         )
 
@@ -205,15 +226,15 @@ class Session(object):
         self.spawn_debuggee.env = util.Env()
 
     def __str__(self):
-        return fmt("Session[{0}]", self.id)
+        return f"Session[{self.id}]"
 
     @property
     def adapter_id(self):
-        return fmt("Adapter[{0}]", self.id)
+        return f"Adapter[{self.id}]"
 
     @property
     def debuggee_id(self):
-        return fmt("Debuggee[{0}]", self.id)
+        return f"Debuggee[{self.id}]"
 
     def __enter__(self):
         return self
@@ -285,6 +306,10 @@ class Session(object):
     @property
     def ignore_unobserved(self):
         return self.timeline.ignore_unobserved
+    
+    @property
+    def is_subprocess(self):
+        return "subProcessId" in self.config
 
     def open_backchannel(self):
         assert self.backchannel is None
@@ -296,7 +321,7 @@ class Session(object):
         if self.log_dir is None:
             return False
 
-        log.info("Logs for {0} will be in {1!j}", self, self.log_dir)
+        log.info("Logs for {0} will be in {1}", self, json.repr(self.log_dir))
         try:
             self.log_dir.remove()
         except Exception:
@@ -340,33 +365,33 @@ class Session(object):
 
         return env
 
+    def _make_python_cmdline(self, exe, *args):
+        return [
+            str(s.strpath if isinstance(s, py.path.local) else s) for s in [exe, *args]
+        ]
+
     def spawn_debuggee(self, args, cwd=None, exe=sys.executable, setup=None):
         assert self.debuggee is None
         assert not len(self.captured_output - {"stdout", "stderr"})
 
-        args = [exe] + [
-            compat.filename_str(s.strpath if isinstance(s, py.path.local) else s)
-            for s in args
-        ]
-
-        cwd = compat.filename_str(cwd) if isinstance(cwd, py.path.local) else cwd
+        args = self._make_python_cmdline(exe, *args)
+        cwd = cwd.strpath if isinstance(cwd, py.path.local) else cwd
 
         env = self._make_env(self.spawn_debuggee.env, codecov=False)
-        env["DEBUGPY_ADAPTER_ENDPOINTS"] = self.adapter_endpoints = (
-            self.tmpdir / "adapter_endpoints"
-        )
+        self.adapter_endpoints = self.tmpdir / "adapter_endpoints"
+        env["DEBUGPY_ADAPTER_ENDPOINTS"] = self.adapter_endpoints.strpath
         if setup is not None:
             env["DEBUGPY_TEST_DEBUGGEE_SETUP"] = setup
 
         log.info(
             "Spawning {0}:\n\n"
-            "Current directory: {1!j}\n\n"
-            "Command line: {2!j}\n\n"
-            "Environment variables: {3!j}\n\n",
+            "Current directory: {1}\n\n"
+            "Command line: {2}\n\n"
+            "Environment variables: {3}\n\n",
             self.debuggee_id,
-            cwd,
-            args,
-            env,
+            json.repr(cwd),
+            json.repr(args),
+            json.repr(env),
         )
 
         popen_fds = {}
@@ -376,12 +401,7 @@ class Session(object):
             popen_fds[stream_name] = wfd
             capture_fds[stream_name] = rfd
         self.debuggee = psutil.Popen(
-            args,
-            cwd=cwd,
-            env=env.for_popen(),
-            bufsize=0,
-            stdin=subprocess.PIPE,
-            **popen_fds
+            args, cwd=cwd, env=env, bufsize=0, stdin=subprocess.PIPE, **popen_fds
         )
         log.info("Spawned {0} with PID={1}", self.debuggee_id, self.debuggee.pid)
         watchdog.register_spawn(self.debuggee.pid, self.debuggee_id)
@@ -402,23 +422,25 @@ class Session(object):
         assert self.adapter is None
         assert self.channel is None
 
-        args = [sys.executable, os.path.dirname(debugpy.adapter.__file__)] + list(args)
+        args = self._make_python_cmdline(
+            sys.executable, os.path.dirname(debugpy.adapter.__file__), *args
+        )
         env = self._make_env(self.spawn_adapter.env)
 
         log.info(
             "Spawning {0}:\n\n"
-            "Command line: {1!j}\n\n"
-            "Environment variables: {2!j}\n\n",
+            "Command line: {1}\n\n"
+            "Environment variables: {2}\n\n",
             self.adapter_id,
-            args,
-            env,
+            json.repr(args),
+            json.repr(env),
         )
         self.adapter = psutil.Popen(
             args,
             bufsize=0,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            env=env.for_popen(),
+            env=env,
         )
         log.info("Spawned {0} with PID={1}", self.adapter_id, self.adapter.pid)
         watchdog.register_spawn(self.adapter.pid, self.adapter_id)
@@ -426,12 +448,22 @@ class Session(object):
         stream = messaging.JsonIOStream.from_process(self.adapter, name=self.adapter_id)
         self._start_channel(stream)
 
+    def expect_server_socket(self, port=some.int):
+        self.expected_adapter_sockets["server"] = {
+            "host": some.str,
+            "port": port,
+            "internal": True,
+        }
+
     def connect_to_adapter(self, address):
         assert self.channel is None
 
         self.before_connect(address)
         host, port = address
         log.info("Connecting to {0} at {1}:{2}", self.adapter_id, host, port)
+
+        self.expected_adapter_sockets["client"]["port"] = port
+
         sock = sockets.create_client()
         sock.connect(address)
 
@@ -448,7 +480,7 @@ class Session(object):
             return self.request_attach()
         else:
             raise ValueError(
-                fmt('Unsupported "request":{0!j} in session.config', request)
+                f'Unsupported "request":{json.repr(request)} in session.config'
             )
 
     def request(self, *args, **kwargs):
@@ -466,8 +498,12 @@ class Session(object):
         if self.timeline.is_frozen and proceed:
             self.proceed()
 
+        if command in ("launch", "attach"):
+            self.start_command = command
+
         message = self.channel.send_request(command, arguments)
         request = self.timeline.record_request(message)
+
         if command in ("launch", "attach"):
             self.start_request = request
 
@@ -479,16 +515,51 @@ class Session(object):
 
     def _process_event(self, event):
         occ = self.timeline.record_event(event, block=False)
+
         if event.event == "exited":
             self.observe(occ)
             self.exit_code = event("exitCode", int)
+            self.exit_reason = event("reason", str, optional=True)
             assert self.exit_code == self.expected_exit_code
+
+        elif event.event == "terminated":
+            # Server socket should be closed next.
+            self.expected_adapter_sockets.pop("server", None)
+
         elif event.event == "debugpyAttach":
             self.observe(occ)
             pid = event("subProcessId", int)
-            watchdog.register_spawn(
-                pid, fmt("{0}-subprocess-{1}", self.debuggee_id, pid)
-            )
+            watchdog.register_spawn(pid, f"{self.debuggee_id}-subprocess-{pid}")
+
+        elif event.event == "debugpySockets":
+            assert not self.is_subprocess
+            sockets = list(event("sockets", json.array(json.object())))
+            for purpose, expected_socket in self.expected_adapter_sockets.items():
+                if expected_socket is None:
+                    continue
+                socket = None
+                for socket in sockets:
+                    if socket == expected_socket:
+                        break
+                assert (
+                    socket is not None
+                ), f"Expected {purpose} socket {expected_socket} not reported by adapter"
+                sockets.remove(socket)
+            assert not sockets, f"Unexpected sockets reported by adapter: {sockets}"
+
+            if self.start_command == "launch":
+                if "launcher" in self.expected_adapter_sockets:
+                    # If adapter has just reported the launcher socket, it shouldn't be
+                    # reported thereafter.
+                    self.expected_adapter_sockets["launcher"] = None
+                elif "server" in self.expected_adapter_sockets:
+                    # If adapter just reported the server socket, the next event should
+                    # report the launcher socket.
+                    self.expected_adapter_sockets["launcher"] = {
+                        "host": some.str,
+                        "port": some.int,
+                        "internal": False,
+                    }
 
     def run_in_terminal(self, args, cwd, env):
         exe = args.pop(0)
@@ -499,14 +570,24 @@ class Session(object):
     def _process_request(self, request):
         self.timeline.record_request(request, block=False)
         if request.command == "runInTerminal":
-            args = request("args", json.array(unicode))
+            args = request("args", json.array(str, vectorize=True))
+            if len(args) > 0 and request("argsCanBeInterpretedByShell", False):
+                # The final arg is a string that contains multiple actual arguments.
+                last_arg = args.pop()
+                args += last_arg.split()
             cwd = request("cwd", ".")
-            env = request("env", json.object(unicode))
+            env = request("env", json.object(str))
             try:
                 return self.run_in_terminal(args, cwd, env)
             except Exception as exc:
                 log.swallow_exception('"runInTerminal" failed:')
                 raise request.cant_handle(str(exc))
+
+        elif request.command == "startDebugging":
+            pid = request("configuration", dict)("subProcessId", int)
+            watchdog.register_spawn(pid, f"{self.debuggee_id}-subprocess-{pid}")
+            return {}
+
         else:
             raise request.isnt_valid("not supported")
 
@@ -556,18 +637,10 @@ class Session(object):
             )
         )
 
-        self.request(
-            "initialize",
-            {
-                "pathFormat": "path",
-                "clientID": self.client_id,
-                "adapterID": "test",
-                "linesStartAt1": True,
-                "columnsStartAt1": True,
-                "supportsVariableType": True,
-                "supportsRunInTerminalRequest": True,
-            },
-        )
+        if not self.is_subprocess:
+            self.wait_for_next(timeline.Event("debugpySockets"))
+
+        self.request("initialize", self.capabilities)
 
     def all_events(self, event, body=some.object):
         return [
@@ -580,7 +653,7 @@ class Session(object):
         all the "output" events received for that category so far.
         """
         events = self.all_events("output", some.dict.containing({"category": category}))
-        return "".join(event("output", unicode) for event in events)
+        return "".join(event("output", str) for event in events)
 
     def _request_start(self, method):
         self.config.normalize()
@@ -632,9 +705,20 @@ class Session(object):
             # If specified, launcher will use it in lieu of PYTHONPATH it inherited
             # from the adapter when spawning debuggee, so we need to adjust again.
             self.config.env.prepend_to("PYTHONPATH", DEBUGGEE_PYTHONPATH.strpath)
+
+        # Adapter is going to start listening for server and spawn the launcher at
+        # this point. Server socket gets reported first.
+        self.expect_server_socket()
+
         return self._request_start("launch")
 
     def request_attach(self):
+        # In attach(listen) scenario, adapter only starts listening for server
+        # after receiving the "attach" request.
+        listen = self.config.get("listen", None)
+        if listen is not None:
+            assert "server" not in self.expected_adapter_sockets
+            self.expect_server_socket(listen["port"])
         return self._request_start("attach")
 
     def request_continue(self):
@@ -664,7 +748,7 @@ class Session(object):
             else:
                 marker = line
                 line = get_marked_line_numbers()[marker]
-                descr = fmt("{0} (@{1})", line, marker)
+                descr = f"{line} (@{marker})"
             bp_log.append((line, descr))
             return {"line": line}
 
@@ -719,9 +803,7 @@ class Session(object):
             "variables", {"variablesReference": scopes[0]("variablesReference", int)}
         )("variables", json.array())
 
-        variables = collections.OrderedDict(
-            ((v("name", unicode), v) for v in variables)
-        )
+        variables = collections.OrderedDict(((v("name", str), v) for v in variables))
         if varnames:
             assert set(varnames) <= set(variables.keys())
             return tuple((variables[name] for name in varnames))
@@ -729,8 +811,7 @@ class Session(object):
             return variables
 
     def get_variable(self, varname, frame_id=None):
-        """Same as get_variables(...)[0].
-        """
+        """Same as get_variables(...)[0]."""
         return self.get_variables(varname, frame_id=frame_id)[0]
 
     def wait_for_next_event(self, event, body=some.object, freeze=True):
@@ -767,7 +848,7 @@ class Session(object):
             expected_stopped["text"] = expected_text
         if expected_description is not None:
             expected_stopped["description"] = expected_description
-        if stopped("reason", unicode) not in [
+        if stopped("reason", str) not in [
             "step",
             "exception",
             "breakpoint",
@@ -786,11 +867,23 @@ class Session(object):
             assert len(expected_frames) <= len(frames)
             assert expected_frames == frames[0 : len(expected_frames)]
 
+        assert len(frames) > 0
+
         fid = frames[0]("id", int)
         return StopInfo(stopped, frames, tid, fid)
 
     def wait_for_next_subprocess(self):
-        return Session(self.wait_for_next_event("debugpyAttach"))
+        message = self.timeline.wait_for_next(
+            timeline.Event("debugpyAttach") | timeline.Request("startDebugging")
+        )
+        if isinstance(message, timeline.EventOccurrence):
+            config = message.body
+            assert "request" in config
+        elif isinstance(message, timeline.RequestOccurrence):
+            config = dict(message.body("configuration", dict))
+            assert "request" not in config
+            config["request"] = "attach"
+        return Session(config)
 
     def wait_for_disconnect(self):
         self.timeline.wait_until_realized(timeline.Mark("disconnect"), freeze=True)

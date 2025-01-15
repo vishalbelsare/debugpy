@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 """Test helpers for networking.
 """
 
@@ -14,11 +12,12 @@ import socket
 import threading
 import time
 
-from debugpy.common import compat, fmt, log
+from debugpy.common import log, util
 from tests.patterns import some
 
-
-def get_test_server_port(start, stop):
+used_ports = set()
+    
+def get_test_server_port():
     """Returns a server port number that can be safely used for listening without
     clashing with another test worker process, when running with pytest-xdist.
 
@@ -31,17 +30,20 @@ def get_test_server_port(start, stop):
     """
 
     try:
-        worker_id = compat.force_ascii(os.environ["PYTEST_XDIST_WORKER"])
+        worker_id = util.force_ascii(os.environ["PYTEST_XDIST_WORKER"])
     except KeyError:
         n = 0
     else:
         assert worker_id == some.bytes.matching(
-            br"gw(\d+)"
+            rb"gw(\d+)"
         ), "Unrecognized PYTEST_XDIST_WORKER format"
         n = int(worker_id[2:])
 
-    port = start + n
-    assert port <= stop
+    port = 5678 + (n * 300)
+    while port in used_ports:
+        port += 1
+    used_ports.add(port)
+
     return port
 
 
@@ -58,7 +60,7 @@ def wait_until_port_is_listening(port, interval=1, max_attempts=1000):
     Connection is immediately closed before returning.
     """
 
-    for i in compat.xrange(1, max_attempts + 1):
+    for i in range(1, max_attempts + 1):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             log.info("Probing localhost:{0} (attempt {1})...", port, i)
@@ -77,8 +79,7 @@ def wait_until_port_is_listening(port, interval=1, max_attempts=1000):
 
 
 class WebRequest(object):
-    """An async wrapper around requests.
-    """
+    """An async wrapper around requests."""
 
     @staticmethod
     def get(*args, **kwargs):
@@ -117,13 +118,13 @@ class WebRequest(object):
         func = getattr(requests, method)
         self._worker_thread = threading.Thread(
             target=lambda: self._worker(func, *args, **kwargs),
-            name=fmt("WebRequest({0})", self),
+            name=f"WebRequest({self})",
         )
         self._worker_thread.daemon = True
         self._worker_thread.start()
 
     def __str__(self):
-        return fmt("HTTP {0} {1}", self.method.upper(), self.url)
+        return f"HTTP {self.method.upper()} {self.url}"
 
     def _worker(self, func, *args, **kwargs):
         try:
@@ -138,8 +139,7 @@ class WebRequest(object):
             )
 
     def wait_for_response(self, timeout=None):
-        """Blocks until the request completes, and returns self.request.
-        """
+        """Blocks until the request completes, and returns self.request."""
         if self._worker_thread.is_alive():
             log.info("Waiting for response to {0} ...", self)
             self._worker_thread.join(timeout)
@@ -149,22 +149,19 @@ class WebRequest(object):
         return self.request
 
     def response_text(self):
-        """Blocks until the request completes, and returns the response body.
-        """
+        """Blocks until the request completes, and returns the response body."""
         return self.wait_for_response().text
 
 
 class WebServer(object):
-    """Interacts with a web server listening on localhost on the specified port.
-    """
+    """Interacts with a web server listening on localhost on the specified port."""
 
     def __init__(self, port):
         self.port = port
-        self.url = fmt("http://localhost:{0}", port)
+        self.url = f"http://localhost:{port}"
 
     def __enter__(self):
-        """Blocks until the server starts listening on self.port.
-        """
+        """Blocks until the server starts listening on self.port."""
         log.info("Web server expected on {0}", self.url)
         wait_until_port_is_listening(self.port, interval=3)
         return self

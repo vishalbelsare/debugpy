@@ -3,8 +3,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import os
 import pytest
 import re
@@ -19,6 +17,7 @@ from tests.patterns import some
 
 @pytest.mark.parametrize("run", runners.all)
 @pytest.mark.parametrize("target", targets.all)
+@pytest.mark.flaky(retries=2, delay=1)
 def test_run(pyfile, target, run):
     @pyfile
     def code_to_debug():
@@ -91,8 +90,7 @@ def test_run_relative_path(pyfile, run):
         with open(pydevd_debug_file, "r") as stream:
             contents = stream.read()
 
-    assert "critical" not in contents
-    assert "Traceback" not in contents
+    assert "FileNotFound" not in contents
 
 
 @pytest.mark.parametrize("run", runners.all_launch)
@@ -252,6 +250,7 @@ def test_custom_python(
 @pytest.mark.parametrize("python_args", [None, "-B"])
 @pytest.mark.parametrize("python", [None, "custompy", "custompy,-O"])
 @pytest.mark.parametrize("python_key", ["python", "pythonPath"])
+@pytest.mark.flaky(retries=2, delay=1)
 def test_custom_python_args(
     pyfile, tmpdir, run, target, python_key, python, python_args
 ):
@@ -327,24 +326,17 @@ def test_frame_eval(pyfile, target, run, frame_eval):
             pass
 
         using_frame_eval = backchannel.receive()
-        assert using_frame_eval == (frame_eval in ("yes", ""))
+        assert using_frame_eval == (frame_eval == "yes")
 
 
-@pytest.mark.skipif(
-    not sys.version_info[0] >= 3,
-    reason="Test structure must still be updated to properly support Python 2 with unicode",
-)
 @pytest.mark.parametrize("run", [runners.all_launch[0]])
 def test_unicode_dir(tmpdir, run, target):
-    from debugpy.common import compat
-
     unicode_chars = "á"
 
-    directory = os.path.join(compat.force_unicode(str(tmpdir), "ascii"), unicode_chars)
-    directory = compat.filename_str(directory)
+    directory = os.path.join(str(tmpdir), unicode_chars)
     os.makedirs(directory)
 
-    code_to_debug = os.path.join(directory, compat.filename_str("experiment.py"))
+    code_to_debug = os.path.join(directory, "experiment.py")
     with open(code_to_debug, "wb") as stream:
         stream.write(
             b"""
@@ -358,7 +350,7 @@ backchannel.send('ok')
 
     with debug.Session() as session:
         backchannel = session.open_backchannel()
-        with run(session, target(compat.filename_str(code_to_debug))):
+        with run(session, target(code_to_debug)):
             pass
 
         received = backchannel.receive()

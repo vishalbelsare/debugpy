@@ -2,18 +2,15 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import py
 import os
 
-from debugpy.common import fmt, compat
+from debugpy.common import json
 from tests.patterns import some
 
 
 class Target(object):
-    """Describes Python code that gets run by a Runner.
-    """
+    """Describes Python code that gets run by a Runner."""
 
     def __init__(self, filename, args=()):
         if filename is not None and not isinstance(filename, py.path.local):
@@ -49,6 +46,14 @@ class Target(object):
         raise NotImplementedError
 
     @property
+    def argslist(self):
+        args = self.args
+        if isinstance(args, str):
+            return [args]
+        else:
+            return list(args)
+
+    @property
     def co_filename(self):
         """co_filename of code objects created at runtime from the source that this
         Target describes, assuming no path mapping.
@@ -65,8 +70,7 @@ class Target(object):
 
     @property
     def lines(self):
-        """Same as self.filename.lines, if it is valid - e.g. for @pyfile objects.
-        """
+        """Same as self.filename.lines, if it is valid - e.g. for @pyfile objects."""
         assert (
             self.filename is not None
         ), "lines() requires Target created from filename"
@@ -76,13 +80,13 @@ class Target(object):
 class Program(Target):
     """
     A Python script, executed directly.
-    
+
     By default executes a program through its absolute path with:
         python /full/path/to/foo.py
-        
+
     If made relative through make_relative(cwd), the cwd is set and the
     launch is made relative to it.
-    
+
         i.e.:
         Given a path such as /full/path/to/foo.py
         if make_relative('/full/path') is called,
@@ -93,7 +97,7 @@ class Program(Target):
     pytest_id = "program"
 
     def __init__(self, filename, args=()):
-        super(Program, self).__init__(filename, args)
+        super().__init__(filename, args)
         self._cwd = ""
 
     def make_relative(self, cwd):
@@ -104,34 +108,32 @@ class Program(Target):
 
     def _get_relative_program(self):
         assert self._cwd
-        relative_filename = compat.filename(self.filename.strpath)[len(self._cwd) :]
+        relative_filename = self.filename.strpath[len(self._cwd) :]
         assert not relative_filename.startswith(("/", "\\"))
         return relative_filename
 
     def __repr__(self):
         if self._cwd:
-            return fmt(
-                "program (relative) {0!j} / {1!j}",
-                self._cwd,
-                self._get_relative_program(),
-            )
+            return f"program (relative) {json.repr(self._cwd)} / {json.repr(self._get_relative_program())}"
         else:
-            return fmt("program {0!j}", compat.filename(self.filename.strpath))
+            return f"program {json.repr(self.filename.strpath)}"
 
     def configure(self, session):
         if self._cwd:
             session.config["cwd"] = self._cwd
             session.config["program"] = self._get_relative_program()
         else:
-            session.config["program"] = compat.filename(self.filename.strpath)
+            session.config["program"] = self.filename.strpath
 
         session.config["args"] = self.args
 
     def cli(self, env):
         if self._cwd:
-            return [self._get_relative_program()] + list(self.args)
+            cli = [self._get_relative_program()]
         else:
-            return [self.filename.strpath] + list(self.args)
+            cli = [self.filename.strpath]
+        cli += self.argslist
+        return cli
 
 
 class Module(Target):
@@ -145,11 +147,11 @@ class Module(Target):
 
     def __init__(self, filename=None, name=None, args=()):
         assert (filename is None) ^ (name is None)
-        super(Module, self).__init__(filename, args)
+        super().__init__(filename, args)
         self.name = name if name is not None else self.filename.purebasename
 
     def __repr__(self):
-        return fmt("module {0}", self.name)
+        return f"module {self.name}"
 
     def configure(self, session):
         session.config["module"] = self.name
@@ -158,7 +160,7 @@ class Module(Target):
     def cli(self, env):
         if self.filename is not None:
             env.prepend_to("PYTHONPATH", self.filename.dirname)
-        return ["-m", self.name] + list(self.args)
+        return ["-m", self.name] + self.argslist
 
 
 class Code(Target):
@@ -171,20 +173,20 @@ class Code(Target):
 
     def __init__(self, filename=None, code=None, args=()):
         assert (filename is None) ^ (code is None)
-        super(Code, self).__init__(filename, args)
+        super().__init__(filename, args)
         if code is not None:
             self.code = code
 
     def __repr__(self):
         lines = self.code.split("\n")
-        return fmt("code: {0!j}", lines)
+        return f"code: {json.repr(lines)}"
 
     def configure(self, session):
         session.config["code"] = self.code
         session.config["args"] = self.args
 
     def cli(self, env):
-        return ["-c", self.code] + list(self.args)
+        return ["-c", self.code] + self.argslist
 
     @property
     def co_filename(self):

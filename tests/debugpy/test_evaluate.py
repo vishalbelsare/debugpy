@@ -2,10 +2,7 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import pytest
-import sys
 
 from tests import debug, timeline
 from tests.patterns import some
@@ -178,26 +175,15 @@ def test_variable_sort(pyfile, target, run):
             "variables", {"variablesReference": b_test["variablesReference"]}
         )["variables"]
         var_names = [v["name"] for v in b_test_vars]
-        if sys.version_info[:2] >= (3, 6):
-            # Note that the special len() we manually create is not added to special variables.
-            expected = [
-                "special variables",
-                "function variables",
-                "'spam'",
-                "'eggs'",
-                "'abcd'",
-                "len()",
-            ]
-        else:
-            expected = [
-                "special variables",
-                "function variables",
-                "'abcd'",
-                "'eggs'",
-                "'spam'",
-                "len()",
-            ]
-
+        # Note that the special len() we manually create is not added to special variables.
+        expected = [
+            "special variables",
+            "function variables",
+            "'spam'",
+            "'eggs'",
+            "'abcd'",
+            "len()",
+        ]
         assert var_names == expected
 
         # Numeric dict keys must be sorted as numbers.
@@ -289,15 +275,12 @@ def test_return_values(pyfile, target, run, ret_vis):
 
 
 # On Python 3, variable names can contain Unicode characters.
-# On Python 2, they must be ASCII, but using a Unicode character in an expression should not crash debugger.
 def test_unicode(pyfile, target, run):
     @pyfile
     def code_to_debug():
         import debuggee
         import debugpy
 
-        # Since Unicode variable name is a SyntaxError at parse time in Python 2,
-        # this needs to do a roundabout way of setting it to avoid parse issues.
         globals()["\u16A0"] = 123
         debuggee.setup()
         debugpy.breakpoint()
@@ -311,10 +294,7 @@ def test_unicode(pyfile, target, run):
         eval = session.request(
             "evaluate", {"expression": "\u16A0", "frameId": stop.frame_id}
         )
-        if sys.version_info >= (3,):
-            assert eval == some.dict.containing({"type": "int", "result": "123"})
-        else:
-            assert eval == some.dict.containing({"type": "SyntaxError"})
+        assert eval == some.dict.containing({"type": "int", "result": "123"})
         session.request_continue()
 
 
@@ -431,88 +411,46 @@ def test_hex_numbers(pyfile, target, run):
             "variables",
             {"variablesReference": c["variablesReference"], "format": {"hex": True}},
         )["variables"]
-        if sys.version_info[:2] < (3, 6):
-            # Sorted dict keys by the name before Python 3.6.
-            assert c_vars == [
-                some.dict.containing(
-                    {
-                        "name": "0x3e8",
-                        "value": "0x3e8",
-                        "type": "int",
-                        "evaluateName": "c[1000]",
-                        "variablesReference": 0,
-                    }
-                ),
-                some.dict.containing(
-                    {
-                        "name": "0x64",
-                        "value": "0x64",
-                        "type": "int",
-                        "evaluateName": "c[100]",
-                        "variablesReference": 0,
-                    }
-                ),
-                some.dict.containing(
-                    {
-                        "name": "0xa",
-                        "value": "0xa",
-                        "type": "int",
-                        "evaluateName": "c[10]",
-                        "variablesReference": 0,
-                    }
-                ),
-                some.dict.containing(
-                    {
-                        "name": "len()",
-                        "value": "0x3",
-                        "type": "int",
-                        "evaluateName": "len(c)",
-                        "variablesReference": 0,
-                        "presentationHint": {"attributes": ["readOnly"]},
-                    }
-                ),
-            ]
-        else:
-            # Use dict sequence on Python 3.6 onwards.
-            assert c_vars == [
-                some.dict.containing(
-                    {
-                        "name": "0xa",
-                        "value": "0xa",
-                        "type": "int",
-                        "evaluateName": "c[10]",
-                        "variablesReference": 0,
-                    }
-                ),
-                some.dict.containing(
-                    {
-                        "name": "0x64",
-                        "value": "0x64",
-                        "type": "int",
-                        "evaluateName": "c[100]",
-                        "variablesReference": 0,
-                    }
-                ),
-                some.dict.containing(
-                    {
-                        "name": "0x3e8",
-                        "value": "0x3e8",
-                        "type": "int",
-                        "evaluateName": "c[1000]",
-                        "variablesReference": 0,
-                    }
-                ),
-                some.dict.containing(
-                    {
-                        "name": "len()",
-                        "value": "0x3",
-                        "type": "int",
-                        "evaluateName": "len(c)",
-                        "variablesReference": 0,
-                        "presentationHint": {"attributes": ["readOnly"]},
-                    }
-                ),
-            ]
+        # Use dict sequence on Python 3.6 onwards.
+        assert c_vars == [
+            some.dict.containing(
+                {
+                    "name": "0xa",
+                    "value": "0xa",
+                    "type": "int",
+                    "evaluateName": "c[10]",
+                    "variablesReference": 0,
+                }
+            ),
+            some.dict.containing(
+                {
+                    "name": "0x64",
+                    "value": "0x64",
+                    "type": "int",
+                    "evaluateName": "c[100]",
+                    "variablesReference": 0,
+                }
+            ),
+            some.dict.containing(
+                {
+                    "name": "0x3e8",
+                    "value": "0x3e8",
+                    "type": "int",
+                    "evaluateName": "c[1000]",
+                    "variablesReference": 0,
+                }
+            ),
+            some.dict.containing(
+                {
+                    "name": "len()",
+                    "value": "0x3",
+                    "type": "int",
+                    "evaluateName": "len(c)",
+                    "variablesReference": 0,
+                    "presentationHint": {"attributes": ["readOnly"]},
+                }
+            ),
+        ]
 
         d_vars = session.request(
             "variables",
@@ -693,8 +631,8 @@ def test_evaluate_thread_locks(pyfile, target, run):
         """
 
         import debuggee
+        import queue
         import threading
-        from debugpy.common.compat import queue
 
         debuggee.setup()
 
@@ -760,4 +698,3 @@ def test_evaluate_thread_locks(pyfile, target, run):
         assert evaluate == some.dict.containing({"result": "None"})
 
         session.request_continue()
-

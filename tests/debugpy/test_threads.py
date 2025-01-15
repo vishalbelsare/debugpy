@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import pytest
 import sys
 import time
@@ -21,7 +19,7 @@ def test_thread_count(pyfile, target, run, count):
         import sys
 
         debuggee.setup()
-        stop = False
+        stop = False # noqa: F841
 
         def worker(tid, offset):
             i = 0
@@ -37,7 +35,7 @@ def test_thread_count(pyfile, target, run, count):
                 threads.append(thread)
                 thread.start()
         print("check here")  # @bp
-        stop = True
+        stop = True  # noqa: F841
 
     with debug.Session() as session:
         with run(session, target(code_to_debug, args=[str(count)])):

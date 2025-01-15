@@ -3,15 +3,12 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import pytest
 import re
 import sys
 
-from debugpy.common import fmt
 import tests
-from tests import debug, test_data
+from tests import debug, test_data, timeline
 from tests.debug import runners, targets
 from tests.patterns import some
 
@@ -39,13 +36,6 @@ def test_path_with_ampersand(target, run):
         session.request_continue()
 
 
-@pytest.mark.skipif(
-    sys.version_info < (3, 0), reason="Paths are not Unicode in Python 2.7"
-)
-@pytest.mark.skipif(
-    sys.platform == "win32" and sys.version_info < (3, 6),
-    reason="https://github.com/microsoft/ptvsd/issues/1124#issuecomment-459506802",
-)
 @pytest.mark.parametrize("target", targets.all_named)
 def test_path_with_unicode(target, run):
     test_py = bp_root / "ನನ್ನ_ಸ್ಕ್ರಿಪ್ಟ್.py"
@@ -173,15 +163,16 @@ def test_error_in_condition(pyfile, target, run, error_name):
                     ],
                 },
             )
-
-    if "internalConsole" not in str(run):
-        assert not session.captured_stdout()
-
-        error_name = error_name.encode("ascii")
-        if expect_traceback:
-            assert error_name in session.captured_stderr()
-        else:
-            assert error_name not in session.captured_stderr()
+    occurrences = session.timeline.all_occurrences_of(
+        timeline.Event("output", some.dict.containing({"category": "important"})),
+    )
+    
+    if expect_traceback:
+        assert len(occurrences) == 10
+        for occurrence in occurrences:
+            assert error_name in occurrence.body['output']
+    else:
+        assert len(occurrences) == 0
 
 
 @pytest.mark.parametrize("condition", ["condition", ""])
@@ -196,7 +187,7 @@ def test_log_point(pyfile, target, run, condition):
         for i in range(0, 10):
             sys.stderr.write(str(i * 10) + "\n")  # @bp
             sys.stderr.flush()
-        ()  # @wait_for_output
+        x = 4  # @wait_for_output
 
     lines = code_to_debug.lines
     with debug.Session() as session:
@@ -214,18 +205,6 @@ def test_log_point(pyfile, target, run, condition):
                 },
             )
 
-        if condition:
-            session.wait_for_stop(
-                "breakpoint", expected_frames=[some.dap.frame(code_to_debug, line="bp")]
-            )
-
-            var_i = session.get_variable("i")
-            assert var_i == some.dict.containing(
-                {"name": "i", "evaluateName": "i", "type": "int", "value": "5"}
-            )
-
-            session.request_continue()
-
         session.wait_for_stop(
             "breakpoint",
             expected_frames=[some.dap.frame(code_to_debug, line="wait_for_output")],
@@ -237,11 +216,14 @@ def test_log_point(pyfile, target, run, condition):
     if "internalConsole" not in str(run):
         assert not session.captured_stdout()
 
-    expected_stdout = "".join(
-        (fmt(r"{0}\r?\n", re.escape(str(i))) for i in range(0, 10))
-    )
+    if condition:
+        expected_stdout = "5\r?\n"
+    else:
+        expected_stdout = "".join(
+            (r"{0}\r?\n".format(re.escape(str(i))) for i in range(0, 10))
+        )
     expected_stderr = "".join(
-        (fmt(r"{0}\r?\n", re.escape(str(i * 10))) for i in range(0, 10))
+        (r"{0}\r?\n".format(re.escape(str(i * 10))) for i in range(0, 10))
     )
     assert session.output("stdout") == some.str.matching(expected_stdout)
     assert session.output("stderr") == some.str.matching(expected_stderr)
@@ -273,7 +255,7 @@ def test_add_and_remove_breakpoint(pyfile, target, run):
         debuggee.setup()
         for i in range(0, 10):
             print(i)  # @bp
-        ()  # @wait_for_output
+        x = 4  # @wait_for_output
 
     with debug.Session() as session:
         session.config["redirectOutput"] = True
@@ -295,7 +277,7 @@ def test_add_and_remove_breakpoint(pyfile, target, run):
         )
         session.request_continue()
 
-    expected_stdout = "".join((fmt("{0}\n", i) for i in range(0, 10)))
+    expected_stdout = "".join(f"{i}\n" for i in range(0, 10))
     assert session.output("stdout") == expected_stdout
 
 
@@ -322,6 +304,7 @@ def test_breakpoint_in_nonexistent_file(pyfile, target, run):
             ]
 
 
+@pytest.mark.flaky(retries=2, delay=1)
 def test_invalid_breakpoints(pyfile, target, run):
     @pyfile
     def code_to_debug():
@@ -333,16 +316,15 @@ def test_invalid_breakpoints(pyfile, target, run):
         # If there's no eN for some rN, it's assumed to be the same line.
         # fmt: off
         b = True
-        while b:         # @e0-27,e0-35,e0-36,e0-37,e0-38,e0-39
+        while b:         # @e0-37,e0-38,e0-39
             pass         # @r0
             break
 
-        print()         # @e1-27,e1-35,e1-36,e1-37 
+        print()         # @e1-37 
         [               # @r1,e2
-            1, 2, 3,    # @e2-27,e2-35,e2-36,e2-37,e2-38
+            1, 2, 3,    # @e2-37,e2-38
         ]               # @r2
 
-        # Python 2.7 only.
         print()         # @e3,e4
         print(1,        # @r3
               2, 3,     # @r4
@@ -351,8 +333,7 @@ def test_invalid_breakpoints(pyfile, target, run):
 
     with debug.Session() as session:
         with run(session, target(code_to_debug)):
-            count = 5 if sys.version_info < (3,) else 3
-            requested_markers = ["r" + str(i) for i in range(0, count)]
+            requested_markers = ["r" + str(i) for i in range(0, 3)]
 
             bps = session.set_breakpoints(code_to_debug, requested_markers)
             actual_lines = [bp["line"] for bp in bps]
@@ -360,7 +341,12 @@ def test_invalid_breakpoints(pyfile, target, run):
             expected_markers = []
             for r in requested_markers:
                 e_generic = "e" + r[1:]
-                e_versioned = e_generic + "-" + str(sys.version_info.major) + str(sys.version_info.minor)
+                e_versioned = (
+                    e_generic
+                    + "-"
+                    + str(sys.version_info.major)
+                    + str(sys.version_info.minor)
+                )
                 for e in e_versioned, e_generic, r:
                     if e in code_to_debug.lines:
                         expected_markers.append(e)
@@ -432,9 +418,6 @@ def test_deep_stacks(pyfile, target, run):
 @pytest.mark.parametrize("target", targets.all)
 @pytest.mark.parametrize("func", ["breakpoint", "debugpy.breakpoint"])
 def test_break_api(pyfile, target, run, func):
-    if func == "breakpoint" and sys.version_info < (3, 7):
-        pytest.skip("breakpoint() was introduced in Python 3.7")
-
     @pyfile
     def code_to_debug():
         import debuggee

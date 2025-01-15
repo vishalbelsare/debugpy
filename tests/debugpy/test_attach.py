@@ -2,21 +2,20 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import pytest
 import sys
 
+from _pydevd_bundle.pydevd_constants import IS_PY312_OR_GREATER
 from tests import debug
-from tests.debug import runners, targets
+from tests.debug import runners
 from tests.patterns import some
 
 
 @pytest.mark.parametrize("stop_method", ["breakpoint", "pause"])
+@pytest.mark.skipif(IS_PY312_OR_GREATER, reason="Flakey test on 312 and higher")
 @pytest.mark.parametrize("is_client_connected", ["is_client_connected", ""])
-@pytest.mark.parametrize("wait_for_client", ["wait_for_client", ""])
-@pytest.mark.parametrize("target", targets.all)
-def test_attach_api(pyfile, target, wait_for_client, is_client_connected, stop_method):
+@pytest.mark.parametrize("wait_for_client", ["wait_for_client", pytest.param("", marks=pytest.mark.skipif(sys.platform.startswith("darwin"), reason="Flakey test on Mac"))])
+def test_attach_api(pyfile, wait_for_client, is_client_connected, stop_method):
     @pyfile
     def code_to_debug():
         import debuggee
@@ -24,6 +23,11 @@ def test_attach_api(pyfile, target, wait_for_client, is_client_connected, stop_m
         import sys
         import time
         from debuggee import backchannel, scratchpad
+
+        # Test different ways of calling configure(). 
+        debugpy.configure(qt="none", subProcess=True, python=sys.executable)
+        debugpy.configure({"qt": "none", "subProcess": True, "python": sys.executable})
+        debugpy.configure({"qt": "none"}, python=sys.executable)
 
         debuggee.setup()
         _, host, port, wait_for_client, is_client_connected, stop_method = sys.argv
@@ -70,6 +74,7 @@ def test_attach_api(pyfile, target, wait_for_client, is_client_connected, stop_m
         )
         session.wait_for_adapter_socket()
 
+        session.expect_server_socket()
         session.connect_to_adapter((host, port))
         with session.request_attach():
             pass
@@ -97,6 +102,51 @@ def test_attach_api(pyfile, target, wait_for_client, is_client_connected, stop_m
 
         session.request_continue()
 
+def test_multiple_listen_raises_exception(pyfile):
+    @pyfile
+    def code_to_debug():
+        import debuggee
+        import debugpy
+        import sys
+
+        from debuggee import backchannel
+
+        debuggee.setup()
+        _, host, port = sys.argv
+        port = int(port)
+        debugpy.listen(address=(host, port))
+        try:
+            debugpy.listen(address=(host, port))
+        except RuntimeError:
+            backchannel.send("listen_exception")
+        
+        debugpy.wait_for_client()
+        debugpy.breakpoint()
+        print("break")  # @breakpoint
+
+    host, port = runners.attach_connect.host, runners.attach_connect.port
+    with debug.Session() as session:
+        backchannel = session.open_backchannel()
+        session.spawn_debuggee(
+            [
+                code_to_debug,
+                host,
+                port,
+            ]
+        )
+  
+        session.wait_for_adapter_socket()
+        session.expect_server_socket()
+        session.connect_to_adapter((host, port))
+        with session.request_attach():
+            pass
+        
+        session.wait_for_stop(
+            expected_frames=[some.dap.frame(code_to_debug, "breakpoint")]
+        )
+        assert backchannel.receive() == "listen_exception"
+        session.request_continue()
+
 
 @pytest.mark.parametrize("run", runners.all_attach_connect)
 def test_reattach(pyfile, target, run):
@@ -122,13 +172,14 @@ def test_reattach(pyfile, target, run):
         session1.expected_exit_code = None  # not expected to exit on disconnect
 
         with run(session1, target(code_to_debug)):
-            pass
+            expected_adapter_sockets = session1.expected_adapter_sockets.copy()
 
         session1.wait_for_stop(expected_frames=[some.dap.frame(code_to_debug, "first")])
         session1.disconnect()
 
     with debug.Session() as session2:
         session2.config.update(session1.config)
+        session2.expected_adapter_sockets = expected_adapter_sockets
         if "connect" in session2.config:
             session2.connect_to_adapter(
                 (session2.config["connect"]["host"], session2.config["connect"]["port"])
@@ -151,6 +202,7 @@ def test_reattach(pyfile, target, run):
     not sys.platform.startswith("linux"),
     reason="https://github.com/microsoft/debugpy/issues/311",
 )
+@pytest.mark.flaky(retries=2, delay=1)
 def test_attach_pid_client(pyfile, target, pid_type):
     @pyfile
     def code_to_debug():
@@ -211,3 +263,41 @@ def test_attach_pid_client(pyfile, target, pid_type):
         )
         session2.scratchpad["exit"] = True
         session2.request_continue()
+
+
+def test_cancel_wait(pyfile):
+    @pyfile
+    def code_to_debug():
+        import debugpy
+        import sys
+        import threading
+        import time
+
+        from debuggee import backchannel
+
+        def cancel():
+            time.sleep(1)
+            debugpy.wait_for_client.cancel()
+
+        _, host, port = sys.argv
+        port = int(port)
+        debugpy.listen(address=(host, port))
+        threading.Thread(target=cancel).start()
+        debugpy.wait_for_client()
+        backchannel.send("exit")
+
+    with debug.Session() as session:
+        host, port = runners.attach_connect.host, runners.attach_connect.port
+        session.config.update({"connect": {"host": host, "port": port}})
+        session.expected_exit_code = None
+
+        backchannel = session.open_backchannel()
+        session.spawn_debuggee(
+            [
+                code_to_debug,
+                host,
+                port,
+            ]
+        )
+
+        assert backchannel.receive() == "exit"

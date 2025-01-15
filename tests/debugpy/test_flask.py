@@ -2,19 +2,16 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import pytest
 import sys
 
-from debugpy.common import compat
 from tests import code, debug, log, net, test_data
 from tests.debug import runners, targets
 from tests.patterns import some
 
 pytestmark = pytest.mark.timeout(60)
 
-flask_server = net.WebServer(net.get_test_server_port(7000, 7100))
+flask_server = net.WebServer(net.get_test_server_port())
 
 
 class paths:
@@ -75,7 +72,7 @@ def test_flask_breakpoint_no_multiproc(start_flask, bp_target):
         "code": (paths.app_py, lines.app_py["bphome"], "home"),
         "template": (paths.hello_html, 8, "template"),
     }[bp_target]
-    bp_var_content = compat.force_str("Flask-Jinja-Test")
+    bp_var_content = "Flask-Jinja-Test"
 
     with debug.Session() as session:
         with start_flask(session):
@@ -219,7 +216,7 @@ def test_flask_exception_no_multiproc(start_flask, exc_type):
 
 def test_flask_breakpoint_multiproc(start_flask):
     bp_line = lines.app_py["bphome"]
-    bp_var_content = compat.force_str("Flask-Jinja-Test")
+    bp_var_content = "Flask-Jinja-Test"
 
     with debug.Session() as parent_session:
         with start_flask(parent_session, multiprocess=True):

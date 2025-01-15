@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import inspect
 
 import debugpy
@@ -16,5 +14,6 @@ def test_docstrings():
         member = getattr(debugpy, attr)
 
         doc = inspect.getdoc(member)
+        assert doc is not None, f"debugpy.{member} doesn't have a docstring"
         for lineno, line in enumerate(doc.split("\n")):
             assert len(line) <= 72
