@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 """Pattern matching for recursive Python data structures.
 
 Usage::
@@ -34,11 +32,8 @@ Usage::
     assert object() == some.object.same_as(object())
 
     assert b"abc" == some.bytes
-    assert u"abc" == some.str
-    if sys.version_info < (3,):
-        assert b"abc" == some.str
-    else:
-        assert b"abc" != some.str
+    assert "abc" == some.str
+    assert b"abc" != some.str
 
     assert "abbc" == some.str.starting_with("ab")
     assert "abbc" == some.str.ending_with("bc")
@@ -84,11 +79,10 @@ __all__ = [
     "tuple",
 ]
 
+import builtins
 import numbers
 import re
-import sys
 
-from debugpy.common.compat import builtins
 from tests.patterns import _impl
 
 
@@ -113,13 +107,7 @@ bytes.ending_with = lambda suffix: bytes.matching(b".*" + re.escape(suffix), re.
 bytes.containing = lambda sub: bytes.matching(b".*" + re.escape(sub) + b".*", re.DOTALL)
 
 
-"""In Python 2, matches both str and unicode. In Python 3, only matches str.
-"""
-if sys.version_info < (3,):
-    str = instanceof((builtins.str, builtins.unicode), "str")
-else:
-    str = instanceof(builtins.str)
-
+str = instanceof(builtins.str)
 str.starting_with = lambda prefix: str.matching(re.escape(prefix) + ".*", re.DOTALL)
 str.ending_with = lambda suffix: str.matching(".*" + re.escape(suffix), re.DOTALL)
 str.containing = lambda sub: str.matching(".*" + re.escape(sub) + ".*", re.DOTALL)

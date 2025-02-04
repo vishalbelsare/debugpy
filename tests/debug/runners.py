@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 """Runners are recipes for executing Targets in a debug.Session.
 
 Every function in this module that is decorated with @_runner must have at least two
@@ -58,7 +56,7 @@ import pytest
 import sys
 
 import debugpy
-from debugpy.common import compat, fmt, log
+from debugpy.common import json, log
 from tests import net, timeline
 from tests.debug import session
 from tests.patterns import some
@@ -102,7 +100,7 @@ def _runner(f):
         def __repr__(self):
             result = type(self).__name__
             args = [str(x) for x in self._args] + [
-                fmt("{0}={1}", k, v) for k, v in self._kwargs.items()
+                f"{k}={v}" for k, v in self._kwargs.items()
             ]
             if len(args):
                 result += "(" + ", ".join(args) + ")"
@@ -118,9 +116,14 @@ def _runner(f):
 
 @_runner
 def launch(session, target, console=None, cwd=None):
-    assert console in (None, "internalConsole", "integratedTerminal", "externalTerminal")
+    assert console in (
+        None,
+        "internalConsole",
+        "integratedTerminal",
+        "externalTerminal",
+    )
 
-    log.info("Launching {0} in {1} using {2!j}.", target, session, console)
+    log.info("Launching {0} in {1} using {2}.", target, session, json.repr(console))
 
     target.configure(session)
     config = session.config
@@ -146,9 +149,9 @@ def launch(session, target, console=None, cwd=None):
 
 
 def _attach_common_config(session, target, cwd):
-    assert target.code is None or "debuggee.setup()" in target.code, fmt(
-        "{0} must invoke debuggee.setup().", target.filename
-    )
+    assert (
+        target.code is None or "debuggee.setup()" in target.code
+    ), f"{target.filename} must invoke debuggee.setup()."
 
     target.configure(session)
     config = session.config
@@ -160,8 +163,6 @@ def _attach_common_config(session, target, cwd):
 @_runner
 @contextlib.contextmanager
 def attach_pid(session, target, cwd=None, wait=True):
-    if sys.version_info < (3,) and sys.platform == "darwin":
-        pytest.skip("https://github.com/microsoft/ptvsd/issues/1916")
     if wait and not sys.platform.startswith("linux"):
         pytest.skip("https://github.com/microsoft/ptvsd/issues/1926")
 
@@ -198,6 +199,7 @@ while "_attach_pid" not in scratchpad:
         config["processId"] = session.debuggee.pid
 
     session.spawn_adapter()
+    session.expect_server_socket()
     with session.request_attach():
         yield
 
@@ -222,7 +224,7 @@ def attach_connect(session, target, method, cwd=None, wait=True, log_dir=None):
         args = [
             os.path.dirname(debugpy.__file__),
             "--listen",
-            compat.filename_str(host) + ":" + str(port),
+            f"{host}:{port}",
         ]
         if wait:
             args += ["--wait-for-client"]
@@ -243,8 +245,7 @@ debugpy.listen(({host!r}, {port!r}))
 if {wait!r}:
     debugpy.wait_for_client()
 """
-        debuggee_setup = fmt(
-            debuggee_setup,
+        debuggee_setup = debuggee_setup.format(
             host=host,
             port=port,
             wait=wait,
@@ -260,6 +261,10 @@ if {wait!r}:
     except KeyError:
         pass
 
+    # If adapter is connecting to the client, the server is already started,
+    # so it should be reported in the initial event.
+    session.expect_server_socket()
+
     session.spawn_debuggee(args, cwd=cwd, setup=debuggee_setup)
     session.wait_for_adapter_socket()
     session.connect_to_adapter((host, port))
@@ -267,7 +272,7 @@ if {wait!r}:
 
 
 attach_connect.host = "127.0.0.1"
-attach_connect.port = net.get_test_server_port(5678, 5800)
+attach_connect.port = net.get_test_server_port()
 
 
 @_runner
@@ -287,7 +292,7 @@ def attach_listen(session, target, method, cwd=None, log_dir=None):
         args = [
             os.path.dirname(debugpy.__file__),
             "--connect",
-            compat.filename_str(host) + ":" + str(port),
+            f"{host}:{port}",
         ]
         if log_dir is not None:
             args += ["--log-to", log_dir]
@@ -297,16 +302,13 @@ def attach_listen(session, target, method, cwd=None, log_dir=None):
     elif method == "api":
         args = []
         api_config = {k: v for k, v in config.items() if k in {"subProcess"}}
-        debuggee_setup = """
+        debuggee_setup = f"""
 import debugpy
 if {log_dir!r}:
     debugpy.log_to({log_dir!r})
 debugpy.configure({api_config!r})
-debugpy.connect({address!r})
+debugpy.connect({(host, port)!r})
 """
-        debuggee_setup = fmt(
-            debuggee_setup, address=(host, port), log_dir=log_dir, api_config=api_config
-        )
     else:
         raise ValueError
     args += target.cli(session.spawn_debuggee.env)
@@ -326,11 +328,14 @@ debugpy.connect({address!r})
 
 
 attach_listen.host = "127.0.0.1"
-attach_listen.port = net.get_test_server_port(5478, 5600)
+attach_listen.port = net.get_test_server_port()
 
-all_launch_terminal = [launch["integratedTerminal"], launch["externalTerminal"]]
+all_launch_terminal = [
+    launch.with_options(console="integratedTerminal"),
+    launch.with_options(console="externalTerminal"),
+]
 
-all_launch = [launch["internalConsole"]] + all_launch_terminal
+all_launch = [launch.with_options(console="internalConsole")] + all_launch_terminal
 
 all_attach_listen = [attach_listen["api"], attach_listen["cli"]]
 

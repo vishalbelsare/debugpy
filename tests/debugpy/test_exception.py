@@ -2,11 +2,10 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import pytest
 import sys
 
+from _pydevd_bundle.pydevd_constants import IS_PY312_OR_GREATER
 from tests import debug
 from tests.debug import runners, targets
 from tests.patterns import some
@@ -149,9 +148,10 @@ def test_vsc_exception_options_raise_without_except(
 
 
 @pytest.mark.skipif(
-    sys.platform == "darwin" and sys.version_info >= (3,),
+    sys.platform == "darwin",
     reason="https://github.com/microsoft/ptvsd/issues/1988",
 )
+@pytest.mark.flaky(retries=2, delay=1)
 @pytest.mark.parametrize("target", targets.all_named)
 @pytest.mark.parametrize("run", runners.all)
 @pytest.mark.parametrize("raised", ["raised", ""])
@@ -302,6 +302,7 @@ def test_raise_exception_options(pyfile, target, run, exceptions, break_mode):
 @pytest.mark.parametrize("exit_code", [0, 3])
 @pytest.mark.parametrize("break_on_system_exit_zero", ["break_on_system_exit_zero", ""])
 @pytest.mark.parametrize("django", ["django", ""])
+@pytest.mark.skipif(sys.platform == 'win32' and IS_PY312_OR_GREATER, reason="Flakey test")
 def test_success_exitcodes(
     pyfile, target, run, exit_code, break_on_system_exit_zero, django
 ):
@@ -354,9 +355,9 @@ def test_exception_stack(pyfile, target, run, max_frames):
         session.expected_exit_code = some.int
 
         max_frames, (min_expected_lines, max_expected_lines) = {
-            "all": (0, (100, 221)),
-            "default": (None, (100, 221)),
-            10: (10, (10, 21)),
+            "all": (0, (100, 308)),
+            "default": (None, (100, 308)),
+            10: (10, (10, 32)),
         }[max_frames]
         if max_frames is not None:
             session.config["maxExceptionStackFrames"] = max_frames

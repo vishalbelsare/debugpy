@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import atexit
 import contextlib
 import functools
@@ -16,7 +14,7 @@ import threading
 import traceback
 
 import debugpy
-from debugpy.common import compat, fmt, timestamp, util
+from debugpy.common import json, timestamp, util
 
 
 LEVELS = ("debug", "info", "warning", "error")
@@ -45,8 +43,7 @@ def _update_levels():
 
 class LogFile(object):
     def __init__(self, filename, file, levels=LEVELS, close_file=True):
-        info("Also logging to {0!j}.", filename)
-
+        info("Also logging to {0}.", json.repr(filename))
         self.filename = filename
         self.file = file
         self.close_file = close_file
@@ -61,7 +58,7 @@ class LogFile(object):
                 platform.machine(),
                 platform.python_implementation(),
                 platform.python_version(),
-                64 if sys.maxsize > 2 ** 32 else 32,
+                64 if sys.maxsize > 2**32 else 32,
                 debugpy.__version__,
                 _to_files=[self],
             )
@@ -81,19 +78,19 @@ class LogFile(object):
             try:
                 self.file.write(output)
                 self.file.flush()
-            except Exception:
+            except Exception:  # pragma: no cover
                 pass
 
     def close(self):
         with _lock:
             del _files[self.filename]
             _update_levels()
-        info("Not logging to {0!j} anymore.", self.filename)
+        info("Not logging to {0} anymore.", json.repr(self.filename))
 
         if self.close_file:
             try:
                 self.file.close()
-            except Exception:
+            except Exception:  # pragma: no cover
                 pass
 
     def __enter__(self):
@@ -130,7 +127,7 @@ def write(level, text, _to_files=all):
 
     t = timestamp.current()
     format_string = "{0}+{1:" + timestamp_format + "}: "
-    prefix = fmt(format_string, level[0].upper(), t)
+    prefix = format_string.format(level[0].upper(), t)
 
     text = getattr(_tls, "prefix", "") + text
     indent = "\n" + (" " * len(prefix))
@@ -153,8 +150,8 @@ def write_format(level, format_string, *args, **kwargs):
         return
 
     try:
-        text = fmt(format_string, *args, **kwargs)
-    except Exception:
+        text = format_string.format(*args, **kwargs)
+    except Exception:  # pragma: no cover
         reraise_exception()
 
     return write(level, text, kwargs.pop("_to_files", all))
@@ -170,12 +167,12 @@ def error(*args, **kwargs):
 
     Returns the output wrapped in AssertionError. Thus, the following::
 
-        raise log.error(...)
+        raise log.error(s, ...)
 
     has the same effect as::
 
         log.error(...)
-        assert False, fmt(...)
+        assert False, (s.format(...))
     """
     return AssertionError(write_format("error", *args, **kwargs))
 
@@ -205,7 +202,7 @@ def _exception(format_string="", *args, **kwargs):
 def swallow_exception(format_string="", *args, **kwargs):
     """Logs an exception with full traceback.
 
-    If format_string is specified, it is formatted with fmt(*args, **kwargs), and
+    If format_string is specified, it is formatted with format(*args, **kwargs), and
     prepended to the exception traceback on a separate line.
 
     If exc_info is specified, the exception it describes will be logged. Otherwise,
@@ -219,8 +216,7 @@ def swallow_exception(format_string="", *args, **kwargs):
 
 
 def reraise_exception(format_string="", *args, **kwargs):
-    """Like swallow_exception(), but re-raises the current exception after logging it.
-    """
+    """Like swallow_exception(), but re-raises the current exception after logging it."""
 
     assert "exc_info" not in kwargs
     _exception(format_string, *args, **kwargs)
@@ -257,9 +253,9 @@ def to_file(filename=None, prefix=None, levels=LEVELS):
             return NoLog()
         try:
             os.makedirs(log_dir)
-        except OSError:
+        except OSError:  # pragma: no cover
             pass
-        filename = fmt("{0}/{1}-{2}.log", log_dir, prefix, os.getpid())
+        filename = f"{log_dir}/{prefix}-{os.getpid()}.log"
 
     file = _files.get(filename)
     if file is None:
@@ -274,7 +270,7 @@ def prefixed(format_string, *args, **kwargs):
     """Adds a prefix to all messages logged from the current thread for the duration
     of the context manager.
     """
-    prefix = fmt(format_string, *args, **kwargs)
+    prefix = format_string.format(*args, **kwargs)
     old_prefix = getattr(_tls, "prefix", "")
     _tls.prefix = prefix + old_prefix
     try:
@@ -283,17 +279,17 @@ def prefixed(format_string, *args, **kwargs):
         _tls.prefix = old_prefix
 
 
-def describe_environment(header):
+def get_environment_description(header):
     import sysconfig
     import site  # noqa
 
     result = [header, "\n\n"]
 
-    def report(*args, **kwargs):
-        result.append(fmt(*args, **kwargs))
+    def report(s, *args, **kwargs):
+        result.append(s.format(*args, **kwargs))
 
     def report_paths(get_paths, label=None):
-        prefix = fmt("    {0}: ", label or get_paths)
+        prefix = f"    {label or get_paths}: "
 
         expr = None
         if not callable(get_paths):
@@ -304,10 +300,11 @@ def describe_environment(header):
         except AttributeError:
             report("{0}<missing>\n", prefix)
             return
-        except Exception:
+        except Exception:  # pragma: no cover
             swallow_exception(
                 "Error evaluating {0}",
-                repr(expr) if expr else compat.srcnameof(get_paths),
+                repr(expr) if expr else util.srcnameof(get_paths),
+                level="info",
             )
             return
 
@@ -316,14 +313,16 @@ def describe_environment(header):
 
         for p in sorted(paths):
             report("{0}{1}", prefix, p)
-            rp = os.path.realpath(p)
-            if p != rp:
-                report("({0})", rp)
+            if p is not None:
+                rp = os.path.realpath(p)
+                if p != rp:
+                    report("({0})", rp)
             report("\n")
 
             prefix = " " * len(prefix)
 
     report("System paths:\n")
+    report_paths("sys.executable")
     report_paths("sys.prefix")
     report_paths("sys.base_prefix")
     report_paths("sys.real_prefix")
@@ -333,20 +332,44 @@ def describe_environment(header):
     site_packages = [
         p
         for p in sys.path
-        if os.path.exists(p)
-        and os.path.basename(p) == compat.filename_str("site-packages")
+        if os.path.exists(p) and os.path.basename(p) == "site-packages"
     ]
     report_paths(lambda: site_packages, "sys.path (site-packages)")
 
     for name in sysconfig.get_path_names():
-        expr = fmt("sysconfig.get_path({0!r})", name)
+        expr = "sysconfig.get_path({0!r})".format(name)
         report_paths(expr)
 
     report_paths("os.__file__")
     report_paths("threading.__file__")
+    report_paths("debugpy.__file__")
+    report("\n")
 
-    result = "".join(result).rstrip("\n")
-    info("{0}", result)
+    importlib_metadata = None
+    try:
+        import importlib_metadata
+    except ImportError:  # pragma: no cover
+        try:
+            from importlib import metadata as importlib_metadata
+        except ImportError:
+            pass
+    if importlib_metadata is None:  # pragma: no cover
+        report("Cannot enumerate installed packages - missing importlib_metadata.")
+    else:
+        report("Installed packages:\n")
+        try:
+            for pkg in importlib_metadata.distributions():
+                report("    {0}=={1}\n", pkg.name, pkg.version)
+        except Exception:  # pragma: no cover
+            swallow_exception(
+                "Error while enumerating installed packages.", level="info"
+            )
+
+    return "".join(result).rstrip("\n")
+
+
+def describe_environment(header):
+    info("{0}", get_environment_description(header))
 
 
 stderr = LogFile(
@@ -381,3 +404,8 @@ def _vars(*names):  # pragma: no cover
 def _stack():  # pragma: no cover
     stack = "\n".join(traceback.format_stack())
     warning("$STACK:\n\n{0}", stack)
+
+
+def _threads():  # pragma: no cover
+    output = "\n".join([str(t) for t in threading.enumerate()])
+    warning("$THREADS:\n\n{0}", output)

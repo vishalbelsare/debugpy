@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 """The main script for the watchdog worker process.
 """
 
@@ -21,18 +19,13 @@ ProcessInfo = collections.namedtuple("ProcessInfo", ["process", "name"])
 
 
 def main(tests_pid):
-    # To import debugpy, the "" entry in sys.path - which is added automatically on
-    # Python 2 - must be removed first; otherwise, we end up importing tests/debugpy.
-    if "" in sys.path:
-        sys.path.remove("")
-
-    from debugpy.common import fmt, log, messaging
+    from debugpy.common import log, messaging
 
     # log.stderr_levels |= {"info"}
     log.timestamp_format = "06.3f"
     log_file = log.to_file(prefix="tests.watchdog")
 
-    stream = messaging.JsonIOStream.from_stdio(fmt("tests-{0}", tests_pid))
+    stream = messaging.JsonIOStream.from_stdio(f"tests-{tests_pid}")
     log.info("Spawned WatchDog-{0} for tests-{0}", tests_pid)
     tests_process = psutil.Process(tests_pid)
     stream.write_json(["watchdog", log_file.filename])
@@ -89,7 +82,7 @@ def main(tests_pid):
                 spawned_processes.pop(pid, None)
 
             else:
-                raise AssertionError(fmt("Unknown watchdog command: {0!r}", command))
+                raise AssertionError(f"Unknown watchdog command: {command!r}")
 
             stream.write_json(["ok"])
 

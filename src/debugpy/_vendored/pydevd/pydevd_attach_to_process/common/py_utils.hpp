@@ -11,6 +11,7 @@ typedef PyThreadState* (PyInterpreterState_ThreadHead)(PyInterpreterState* inter
 typedef PyThreadState* (PyThreadState_Next)(PyThreadState *tstate);
 typedef PyThreadState* (PyThreadState_Swap)(PyThreadState *tstate);
 typedef PyThreadState* (_PyThreadState_UncheckedGet)();
+typedef PyThreadState* (_PyThreadState_GetCurrent)();
 typedef PyObject* (PyObject_CallFunctionObjArgs)(PyObject *callable, ...);    // call w/ varargs, last arg should be nullptr
 typedef PyObject* (PyInt_FromLong)(long);
 typedef PyObject* (PyErr_Occurred)();
@@ -35,6 +36,7 @@ typedef PyObject* PyEval_CallObjectWithKeywords(PyObject *callable, PyObject *ar
 
 typedef void (PyEval_SetTrace)(Py_tracefunc, PyObject *);
 typedef int (*Py_tracefunc)(PyObject *, PyFrameObject *frame, int, PyObject *);
+typedef int (_PyEval_SetTrace)(PyThreadState *tstate, Py_tracefunc func, PyObject *arg);
 
 typedef PyObject* PyObject_Repr(PyObject *);
 typedef const char* PyUnicode_AsUTF8(PyObject *unicode);

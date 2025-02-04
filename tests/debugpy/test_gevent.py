@@ -2,12 +2,12 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
+import pytest
 from tests import debug
 from tests.patterns import some
+from _pydevd_bundle.pydevd_constants import IS_PY313_OR_GREATER
 
-
+@pytest.mark.skipif(IS_PY313_OR_GREATER, reason="gevent is not up to date with 3.13 (_tstate_lock is not part of thread anymore)")
 def test_gevent(pyfile, target, run):
     @pyfile
     def code_to_debug():

@@ -2,15 +2,8 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import os
-import sys
-
-if sys.version_info >= (3, 3):
-    from collections.abc import MutableMapping, MutableSet
-else:
-    from collections import MutableMapping, MutableSet
+from collections.abc import MutableMapping, MutableSet
 
 
 class DebugConfig(MutableMapping):
@@ -56,7 +49,6 @@ class DebugConfig(MutableMapping):
         "type": (),
         # Launch
         "args": [],
-        "argsExpansion": "shell",
         "code": (),
         "console": "internal",
         "cwd": (),
@@ -132,6 +124,9 @@ class DebugConfig(MutableMapping):
     def __setitem__(self, key, value):
         assert key in self.PROPERTIES
         self._dict[key] = value
+
+    def __repr__(self):
+        return repr(dict(self))
 
     def __getstate__(self):
         return dict(self)

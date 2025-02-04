@@ -2,15 +2,14 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
+import os
 import psutil
 import pytest
 import sys
 
 import debugpy
 import tests
-from tests import debug, log
+from tests import debug, log, timeline
 from tests.debug import runners
 from tests.patterns import some
 
@@ -42,11 +41,7 @@ def expected_subprocess_config(parent_session):
 
 @pytest.mark.parametrize(
     "start_method",
-    [""]
-    if sys.version_info < (3,)
-    else ["spawn"]
-    if sys.platform == "win32"
-    else ["spawn", "fork"],
+    ["spawn"] if sys.platform == "win32" else ["spawn", "fork"],
 )
 def test_multiprocessing(pyfile, target, run, start_method):
     if start_method == "spawn" and sys.platform != "win32":
@@ -156,7 +151,8 @@ def test_multiprocessing(pyfile, target, run, start_method):
 
 
 @pytest.mark.parametrize("subProcess", [True, False, None])
-def test_subprocess(pyfile, target, run, subProcess):
+@pytest.mark.parametrize("method", ["startDebugging", "debugpyAttach", ""])
+def test_subprocess(pyfile, target, run, subProcess, method):
     @pyfile
     def child():
         import os
@@ -193,6 +189,8 @@ def test_subprocess(pyfile, target, run, subProcess):
     with debug.Session() as parent_session:
         backchannel = parent_session.open_backchannel()
 
+        if method:
+            parent_session.capabilities["supportsStartDebuggingRequest"] = (method == "startDebugging")
         parent_session.config["preLaunchTask"] = "doSomething"
         parent_session.config["postDebugTask"] = "doSomethingElse"
         if subProcess is not None:
@@ -205,9 +203,19 @@ def test_subprocess(pyfile, target, run, subProcess):
             return
 
         expected_child_config = expected_subprocess_config(parent_session)
-        child_config = parent_session.wait_for_next_event("debugpyAttach")
+        
+        if method == "startDebugging":
+            subprocess_request = parent_session.timeline.wait_for_next(timeline.Request("startDebugging"))
+            child_config = subprocess_request.arguments("configuration", dict)
+            del expected_child_config["request"]
+        else:
+            child_config = parent_session.wait_for_next_event("debugpyAttach")
+
+        child_config = dict(child_config)
         child_config.pop("isOutputRedirected", None)
         assert child_config == expected_child_config
+        child_config["request"] = "attach"
+
         parent_session.proceed()
 
         with debug.Session(child_config) as child_session:
@@ -219,7 +227,7 @@ def test_subprocess(pyfile, target, run, subProcess):
             assert str(child_pid) in child_config["name"]
 
             debugpy_file = backchannel.receive()
-            assert debugpy_file == debugpy.__file__
+            assert os.path.abspath(debugpy_file) == os.path.abspath(debugpy.__file__)
 
             child_argv = backchannel.receive()
             assert child_argv == [child, "--arg1", "--arg2", "--arg3"]
@@ -406,8 +414,7 @@ def test_echo_and_shell(pyfile, target, run):
             cwd=os.path.dirname(os.path.abspath(__file__)),
         )
         stdout, _stderr = p.communicate()
-        if sys.version_info[0] >= 3:
-            stdout = stdout.decode("utf-8")
+        stdout = stdout.decode("utf-8")
 
         if "code_to_run.py" not in stdout:
             raise AssertionError(
@@ -466,11 +473,13 @@ def test_subprocess_unobserved(pyfile, run, target, wait):
             if wait:
                 # The child process should not have started running user code until
                 # there was a client connection, so the breakpoint should be hit.
-                child_session.wait_for_stop(expected_frames=[some.dap.frame(child, line="bp")])
+                child_session.wait_for_stop(
+                    expected_frames=[some.dap.frame(child, line="bp")]
+                )
                 child_session.request_continue()
             else:
                 # The breakpoint shouldn't be hit, since that line should have been
-                # executed before we attached. 
+                # executed before we attached.
                 pass
 
             backchannel.send("proceed")
@@ -478,7 +487,9 @@ def test_subprocess_unobserved(pyfile, run, target, wait):
 
 
 @pytest.mark.parametrize("run", runners.all_launch)
-@pytest.mark.skipif(sys.platform != "win32", reason="job objects are specific to Windows")
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="job objects are specific to Windows"
+)
 def test_breakaway_job(pyfile, target, run):
     @pyfile
     def child():
@@ -515,10 +526,12 @@ def test_breakaway_job(pyfile, target, run):
         proc.wait()
 
     with debug.Session() as parent_session:
-        parent_session.config.update({
-            "redirectOutput": False,
-            "subProcess": False,
-        })
+        parent_session.config.update(
+            {
+                "redirectOutput": False,
+                "subProcess": False,
+            }
+        )
         parent_session.expected_exit_code = some.int
         backchannel = parent_session.open_backchannel()
 
@@ -537,3 +550,49 @@ def test_breakaway_job(pyfile, target, run):
 
     log.info("Waiting for child process...")
     child_process.wait()
+
+
+@pytest.mark.parametrize("run", runners.all_launch)
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="os.exec() is specific to POSIX"
+)
+def test_subprocess_replace(pyfile, target, run):
+    @pyfile
+    def child():
+        import os
+        import sys
+
+        assert "debugpy" in sys.modules
+
+        from debuggee import backchannel
+
+        backchannel.send(os.getpid())
+
+    @pyfile
+    def parent():
+        import debuggee
+        import os
+        import sys
+
+        debuggee.setup()
+        print(f"execl({sys.executable!r}, {sys.argv[1]!r})")
+        os.execl(sys.executable, sys.executable, sys.argv[1])
+
+    with debug.Session() as parent_session:
+        backchannel = parent_session.open_backchannel()
+        with run(parent_session, target(parent, args=[child])):
+            pass
+
+        expected_child_config = expected_subprocess_config(parent_session)
+        child_config = parent_session.wait_for_next_event("debugpyAttach")
+        child_config.pop("isOutputRedirected", None)
+        assert child_config == expected_child_config
+        parent_session.proceed()
+
+        with debug.Session(child_config) as child_session:
+            with child_session.start():
+                pass
+
+            child_pid = backchannel.receive()
+            assert child_pid == child_config["subProcessId"]
+            assert str(child_pid) in child_config["name"]

@@ -2,8 +2,6 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import os
 import pytest
 import sys
@@ -30,7 +28,9 @@ def test_env_replace_var(pyfile, target, run, case, new_value):
 
     with debug.Session() as session:
         backchannel = session.open_backchannel()
-        session.config.env[varname if case == "match_case" else varname.lower()] = new_value
+        session.config.env[
+            varname if case == "match_case" else varname.lower()
+        ] = new_value
 
         os.environ[varname] = "1"
         try:

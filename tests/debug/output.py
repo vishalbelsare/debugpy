@@ -2,18 +2,15 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import os
 import re
 import threading
 
-from debugpy.common import fmt, log
+from debugpy.common import log
 
 
 class CapturedOutput(object):
-    """Captures stdout and stderr of the debugged process.
-    """
+    """Captures stdout and stderr of the debugged process."""
 
     def __init__(self, session, **fds):
         self.session = session
@@ -26,7 +23,7 @@ class CapturedOutput(object):
             self._capture(fd, stream_name)
 
     def __str__(self):
-        return fmt("CapturedOutput[{0}]", self.session.id)
+        return f"CapturedOutput[{self.session.id}]"
 
     def _worker(self, fd, name):
         chunks = self._chunks[name]
@@ -54,15 +51,14 @@ class CapturedOutput(object):
         self._chunks[name] = []
 
         thread = threading.Thread(
-            target=lambda: self._worker(fd, name), name=fmt("{0} {1}", self, name)
+            target=lambda: self._worker(fd, name), name=f"{self} {name}"
         )
         thread.daemon = True
         thread.start()
         self._worker_threads.append(thread)
 
     def wait(self, timeout=None):
-        """Wait for all remaining output to be captured.
-        """
+        """Wait for all remaining output to be captured."""
         if not self._worker_threads:
             return
         log.debug("Waiting for remaining {0} output...", self.session.debuggee_id)
@@ -75,7 +71,7 @@ class CapturedOutput(object):
             result = self._chunks[which]
         except KeyError:
             raise AssertionError(
-                fmt("{0} was not captured for {1}", which, self.session.debuggee_id)
+                f"{which} was not captured for {self.session.debuggee_id}"
             )
 
         with self._lock:
@@ -88,27 +84,27 @@ class CapturedOutput(object):
     def stdout(self, encoding=None):
         """Returns stdout captured from the debugged process, as a single string.
 
-        If encoding is None, returns bytes. Otherwise, returns unicode.
+        If encoding is None, returns bytes. Otherwise, returns str.
         """
         return self._output("stdout", encoding, lines=False)
 
     def stderr(self, encoding=None):
         """Returns stderr captured from the debugged process, as a single string.
 
-        If encoding is None, returns bytes. Otherwise, returns unicode.
+        If encoding is None, returns bytes. Otherwise, returns str.
         """
         return self._output("stderr", encoding, lines=False)
 
     def stdout_lines(self, encoding=None):
         """Returns stdout captured from the debugged process, as a list of lines.
 
-        If encoding is None, each line is bytes. Otherwise, each line is unicode.
+        If encoding is None, each line is bytes. Otherwise, each line is str.
         """
         return self._output("stdout", encoding, lines=True)
 
     def stderr_lines(self, encoding=None):
         """Returns stderr captured from the debugged process, as a list of lines.
 
-        If encoding is None, each line is bytes. Otherwise, each line is unicode.
+        If encoding is None, each line is bytes. Otherwise, each line is str.
         """
         return self._output("stderr", encoding, lines=True)

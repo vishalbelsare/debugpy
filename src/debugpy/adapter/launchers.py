@@ -2,15 +2,15 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import os
 import subprocess
 import sys
 
 from debugpy import adapter, common
-from debugpy.common import compat, fmt, log, messaging, sockets
-from debugpy.adapter import components, servers
+from debugpy.common import log, messaging, sockets
+from debugpy.adapter import components, servers, sessions
+
+listener = None
 
 
 class Launcher(components.Component):
@@ -21,7 +21,7 @@ class Launcher(components.Component):
     def __init__(self, session, stream):
         with session:
             assert not session.launcher
-            super(Launcher, self).__init__(session, stream)
+            super().__init__(session, stream)
 
             self.pid = None
             """Process ID of the debuggee process, as reported by the launcher."""
@@ -72,11 +72,14 @@ def spawn_debuggee(
     launcher_path,
     adapter_host,
     args,
+    shell_expand_args,
     cwd,
     console,
     console_title,
     sudo,
 ):
+    global listener
+
     # -E tells sudo to propagate environment variables to the target process - this
     # is necessary for launcher to get DEBUGPY_LAUNCHER_PORT and DEBUGPY_LOG_DIR.
     cmdline = ["sudo", "-E"] if sudo else []
@@ -102,33 +105,26 @@ def spawn_debuggee(
         raise start_request.cant_handle(
             "{0} couldn't create listener socket for launcher: {1}", session, exc
         )
+    sessions.report_sockets()
 
     try:
         launcher_host, launcher_port = listener.getsockname()
         launcher_addr = (
             launcher_port
             if launcher_host == "127.0.0.1"
-            else fmt("{0}:{1}", launcher_host, launcher_port)
+            else f"{launcher_host}:{launcher_port}"
         )
         cmdline += [str(launcher_addr), "--"]
         cmdline += args
 
         if log.log_dir is not None:
-            env[str("DEBUGPY_LOG_DIR")] = compat.filename_str(log.log_dir)
+            env[str("DEBUGPY_LOG_DIR")] = log.log_dir
         if log.stderr.levels != {"warning", "error"}:
             env[str("DEBUGPY_LOG_STDERR")] = str(" ".join(log.stderr.levels))
 
         if console == "internalConsole":
             log.info("{0} spawning launcher: {1!r}", session, cmdline)
             try:
-                for i, arg in enumerate(cmdline):
-                    try:
-                        cmdline[i] = compat.filename_str(arg)
-                    except UnicodeEncodeError as exc:
-                        raise start_request.cant_handle(
-                            "Invalid command line argument {0!j}: {1}", arg, exc
-                        )
-
                 # If we are talking to the client over stdio, sys.stdin and sys.stdout
                 # are redirected to avoid mangling the DAP message stream. Make sure
                 # the launcher also respects that.
@@ -154,8 +150,12 @@ def spawn_debuggee(
             }
             if cwd is not None:
                 request_args["cwd"] = cwd
+            if shell_expand_args:
+                request_args["argsCanBeInterpretedByShell"] = True
             try:
-                session.client.channel.request("runInTerminal", request_args)
+                # It is unspecified whether this request receives a response immediately, or only
+                # after the spawned command has completed running, so do not block waiting for it.
+                session.client.channel.send_request("runInTerminal", request_args)
             except messaging.MessageHandlingError as exc:
                 exc.propagate(start_request)
 
@@ -194,3 +194,5 @@ def spawn_debuggee(
 
     finally:
         listener.close()
+        listener = None
+        sessions.report_sockets()

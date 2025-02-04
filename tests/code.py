@@ -2,15 +2,11 @@
 # Licensed under the MIT License. See LICENSE in the project root
 # for license information.
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 """Helpers to work with Python code.
 """
 
 import py.path
 import re
-
-from debugpy.common import compat
 
 _marked_line_numbers_cache = {}
 
@@ -36,13 +32,13 @@ def get_marked_line_numbers(path):
     except KeyError:
         pass
 
-    # Read as bytes, to avoid decoding errors on Python 3.
+    # Read as bytes to avoid decoding errors.
     with open(path, "rb") as f:
         lines = {}
         for i, line in enumerate(f):
-            match = re.search(br"#\s*@(.+?)\s*$", line)
+            match = re.search(rb"#\s*@(.+?)\s*$", line)
             if match:
-                markers = compat.force_unicode(match.group(1), "ascii")
+                markers = match.group(1).decode("ascii")
                 for marker in markers.split(","):
                     lines[marker] = i + 1
 
